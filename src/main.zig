@@ -107,8 +107,8 @@ pub fn main() !void {
     var operands = OperandStack.init();
     while (tokens.pop()) |token| {
         switch (token) {
-            .operand => |value| {
-                operands.push(value) catch {
+            .operand => |operand| {
+                operands.push(operand) catch {
                     try stderr.print("Exceeded maximum operand count.\n", .{});
                     return;
                 };
