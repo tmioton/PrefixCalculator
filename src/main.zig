@@ -41,7 +41,7 @@ const TokenType = enum(u8) {
     operator,
 };
 
-const Operator = enum { add, sub, mul, div };
+const Operator = enum { add, sub, mul, div, pow };
 
 const Token = union(TokenType) {
     operand: f64,
@@ -63,7 +63,7 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
 
-    const operators = [_]Operator{ .add, .sub, .mul, .div };
+    const operators = [_]Operator{ .add, .sub, .mul, .div, .pow };
 
     var tokens = TokenStack.init();
     {
@@ -126,6 +126,7 @@ pub fn main() !void {
                     .sub => a - b,
                     .mul => a * b,
                     .div => a / b,
+                    .pow => std.math.pow(f64, a, b),
                 }) catch unreachable; // We just pulled two operands off, it's impossible to not have space.
             },
         }
