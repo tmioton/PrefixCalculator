@@ -41,7 +41,23 @@ const TokenType = enum(u8) {
     operator,
 };
 
-const Operator = enum { add, sub, mul, div, pow };
+const Operator = enum {
+    add,
+    sub,
+    mul,
+    div,
+    pow,
+
+    const options = go: {
+        // Use len of fields to set array size, fields to fill array.
+        const fields = std.meta.fields(Operator);
+        var ops: [fields.len]Operator = undefined;
+        for (fields, 0..) |operator, i| {
+            ops[i] = @enumFromInt(operator.value);
+        }
+        break :go ops;
+    };
+};
 
 const Token = union(TokenType) {
     operand: f64,
@@ -63,8 +79,6 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
 
-    const operators = [_]Operator{ .add, .sub, .mul, .div, .pow };
-
     var tokens = TokenStack.init();
     {
         var arg_buffer: [1024]u8 = undefined;
@@ -78,7 +92,7 @@ pub fn main() !void {
             if (arg.len == 0) continue;
 
             const operand = sToF(arg);
-            const operator: ?Operator = for (operators) |op| {
+            const operator: ?Operator = for (Operator.options) |op| {
                 if (std.mem.eql(u8, @tagName(op), arg)) break op;
             } else null;
 
