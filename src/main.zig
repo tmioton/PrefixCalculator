@@ -49,7 +49,6 @@ const Operator = enum {
     pow,
 
     const options = go: {
-        // Use len of fields to set array size, fields to fill array.
         const fields = std.meta.fields(Operator);
         var ops: [fields.len]Operator = undefined;
         for (fields, 0..) |operator, i| {
