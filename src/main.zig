@@ -13,20 +13,13 @@ const InputStore = struct {
     const capacity = 256;
     const string_capacity = capacity * 4;
 
-    strings: [*]u8 = undefined,
-    slices: [*]StoreSlice = undefined,
+    strings: [string_capacity]u8 = undefined,
+    slices: [capacity]StoreSlice = undefined,
     head: usize = 0,
     len: usize = 0,
 
-    fn init(allocator: std.mem.Allocator) !InputStore {
-        return .{ .strings = (try allocator.alloc(u8, string_capacity)).ptr, .slices = (try allocator.alloc(StoreSlice, capacity)).ptr, .head = 0, .len = 0 };
-    }
-
-    fn deinit(self: *InputStore, allocator: std.mem.Allocator) void {
-        allocator.free(self.strings[0..string_capacity]);
-        allocator.free(self.slices[0..capacity]);
-        self.head = 0;
-        self.len = 0;
+    fn init() InputStore {
+        return .{};
     }
 
     fn push(self: *InputStore, value: []const u8) error{ full, out_of_range }!void {
@@ -42,12 +35,12 @@ const InputStore = struct {
         self.len += 1;
     }
 
-    fn get(self: InputStore, index: usize) []const u8 {
+    fn get(self: *const InputStore, index: usize) []const u8 {
         const slice = self.slices[index];
         return self.strings[slice.head .. slice.head + slice.len];
     }
 
-    fn all(self: InputStore) []const u8 {
+    fn all(self: *const InputStore) []const u8 {
         return self.strings[0..self.head];
     }
 };
@@ -57,7 +50,7 @@ const ErrorString = struct {
     data: [capacity]u8 = undefined,
     len: usize = 0,
 
-    fn init(store: InputStore, index: usize) ErrorString {
+    fn init(store: *const InputStore, index: usize) ErrorString {
         var self: ErrorString = .{};
         const item = store.slices[index];
         @memset(self.data[0..item.head], ' ');
@@ -66,7 +59,7 @@ const ErrorString = struct {
         return self;
     }
 
-    fn get(self: ErrorString) []const u8 {
+    fn get(self: *const ErrorString) []const u8 {
         return self.data[0..self.len];
     }
 };
@@ -157,14 +150,10 @@ pub fn main() !u8 {
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
 
-    var dba = std.heap.DebugAllocator(.{}){};
-    const debug_allocator = dba.allocator();
-
     //const type_in_question = Token;
     //try stdout.print("Size of {s}: {}\n", .{ @typeName(type_in_question), @sizeOf(type_in_question) });
 
-    var input = try InputStore.init(debug_allocator);
-    defer input.deinit(debug_allocator);
+    var input = InputStore.init();
 
     var tokens = TokenStack.init();
     {
@@ -215,13 +204,14 @@ pub fn main() !u8 {
         } else null;
 
         if (operand == null and operator == null) {
-            const error_string = ErrorString.init(input, i);
+            const error_string = ErrorString.init(&input, i);
             try stderr.print("Invalid operator or operand.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
             return 1;
         }
 
         tokens.push(if (operand != null) .{ .operand = operand.? } else .{ .operator = operator.? }) catch {
-            try stderr.print("Exceeded maximum count of operands and operators.\n", .{});
+            const error_string = ErrorString.init(&input, i);
+            try stderr.print("Exceeded maximum count of operands and operators.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
             return 1;
         };
     }
@@ -236,6 +226,7 @@ pub fn main() !u8 {
     // add pops last 2 numbers and adds result to stack.
     // No more tokens, pop result from stack.
 
+    var token_input: usize = 0;
     var operands = Stack(f64).init();
     while (tokens.pop()) |token| {
         switch (token) {
@@ -262,6 +253,7 @@ pub fn main() !u8 {
                 }) catch unreachable; // We just pulled two operands off, it's impossible to not have space.
             },
         }
+        token_input += 1;
     }
 
     if (operands.len < 1) {
