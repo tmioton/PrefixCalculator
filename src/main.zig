@@ -1,5 +1,8 @@
 const std = @import("std");
 
+const string_max = 1024;
+const token_max = 256;
+
 const InputStore = struct {
     /// Structure for storing command-line inputs for good error output.
     ///  Automatically adds spaces between arguments.
@@ -10,10 +13,10 @@ const InputStore = struct {
 
     const limit_head = std.math.maxInt(@FieldType(StoreSlice, "head"));
     const limit_string = std.math.maxInt(@FieldType(StoreSlice, "len"));
-    const capacity = 256;
-    const string_capacity = capacity * 4;
 
-    strings: [string_capacity]u8 = undefined,
+    const capacity = token_max + 1;
+
+    strings: [string_max]u8 = undefined,
     slices: [capacity]StoreSlice = undefined,
     head: usize = 0,
     len: usize = 0,
@@ -22,32 +25,34 @@ const InputStore = struct {
         return .{};
     }
 
+    /// Store a string.
     fn push(self: *InputStore, value: []const u8) error{ full, out_of_range }!void {
         if (self.head + value.len > limit_head or value.len > limit_string) return error.out_of_range;
-        if (self.len == capacity or self.head + value.len > string_capacity) return error.full;
+        if (self.len == capacity or self.head + value.len > string_max) return error.full;
         if (self.len != 0) {
             self.strings[self.head] = ' ';
             self.head += 1;
         }
-        std.mem.copyForwards(u8, self.strings[self.head..string_capacity], value);
+        std.mem.copyForwards(u8, self.strings[self.head..string_max], value);
         self.slices[self.len] = .{ .head = @truncate(self.head), .len = @truncate(value.len) };
         self.head += value.len;
         self.len += 1;
     }
 
+    /// Return the nth string pushed into the store.
     fn get(self: *const InputStore, index: usize) []const u8 {
         const slice = self.slices[index];
         return self.strings[slice.head .. slice.head + slice.len];
     }
 
+    /// Join all strings together into a command-line representation.
     fn all(self: *const InputStore) []const u8 {
         return self.strings[0..self.head];
     }
 };
 
 const ErrorString = struct {
-    const capacity = 1016;
-    data: [capacity]u8 = undefined,
+    data: [string_max]u8 = undefined,
     len: usize = 0,
 
     fn init(store: *const InputStore, index: usize) ErrorString {
@@ -68,26 +73,27 @@ fn Stack(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        const capacity = 256;
-
-        data: [capacity]T = undefined,
+        data: [token_max]T = undefined,
         len: usize = 0,
 
         fn init() Self {
             return .{};
         }
 
+        /// Empty the stack.
         fn reset(self: *Self) void {
             self.data = undefined;
             self.len = 0;
         }
 
+        /// Add an item to the end of the stack.
         fn push(self: *Self, value: T) error{full}!void {
-            if (self.len == Self.capacity) return error.full;
+            if (self.len == token_max) return error.full;
             self.data[self.len] = value;
             self.len += 1;
         }
 
+        /// Remove an item from the end of the stack.
         fn pop(self: *Self) ?T {
             if (self.len == 0) return null;
             self.len -= 1;
@@ -104,18 +110,17 @@ const TokenStack = struct {
     const Data = union { operand: f64, operator: Operator };
     const Token = union(Type) { operand: f64, operator: Operator };
 
-    const capacity = 256;
-
-    tokens: [capacity]Data = undefined,
-    types: [capacity]Type = undefined,
+    tokens: [token_max]Data = undefined,
+    types: [token_max]Type = undefined,
     len: usize = 0,
 
     fn init() TokenStack {
         return .{};
     }
 
+    /// Add a token to the end of the stack.
     fn push(self: *TokenStack, value: Token) error{full}!void {
-        if (self.len == capacity) return error.full;
+        if (self.len == token_max) return error.full;
         switch (value) {
             .operand => |operand| {
                 self.tokens[self.len] = .{ .operand = operand };
@@ -130,6 +135,7 @@ const TokenStack = struct {
         }
     }
 
+    /// Remove a token from the end of the stack.
     fn pop(self: *TokenStack) ?Token {
         if (self.len == 0) return null;
         self.len -= 1;
@@ -142,10 +148,6 @@ const TokenStack = struct {
 
 pub fn main() !u8 {
     // How do we add good error output?
-    //  We need to track where the token was in the command input and how long it was.
-    //  Strip the path off the command name.
-    //  Since we will strip the path, it doesn't help us to have access to the original arg string anyway.
-    //  Print help text.
     //  Try to determine if the input was meant to be an operand or operator. <- this probably requires an AST.
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
@@ -157,7 +159,7 @@ pub fn main() !u8 {
 
     var tokens = TokenStack.init();
     {
-        var arg_buffer: [4096]u8 = undefined;
+        var arg_buffer: [string_max]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&arg_buffer);
         const allocator = fba.allocator();
         var args = try std.process.argsWithAllocator(allocator);
@@ -226,7 +228,7 @@ pub fn main() !u8 {
     // add pops last 2 numbers and adds result to stack.
     // No more tokens, pop result from stack.
 
-    var token_input: usize = 0;
+    var token_input: usize = tokens.len;
     var operands = Stack(f64).init();
     while (tokens.pop()) |token| {
         switch (token) {
@@ -239,7 +241,8 @@ pub fn main() !u8 {
             .operator => |operator| {
                 // Check length here to avoid duplicated checking below.
                 if (operands.len < 2) {
-                    try stderr.print("Operator missing required operands.\n", .{});
+                    const error_string = ErrorString.init(&input, token_input);
+                    try stderr.print("Operator missing required operands.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
                     return 1;
                 }
                 const a = operands.pop().?;
@@ -253,7 +256,7 @@ pub fn main() !u8 {
                 }) catch unreachable; // We just pulled two operands off, it's impossible to not have space.
             },
         }
-        token_input += 1;
+        token_input -= 1;
     }
 
     if (operands.len < 1) {
