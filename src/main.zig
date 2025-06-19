@@ -248,9 +248,6 @@ pub fn main() !u8 {
     // Add 1 to stack.
     // add pops last 2 numbers and adds result to stack.
     // No more tokens, pop result from stack.
-    //
-    // What are the possibilities here?
-    // We can't accept more than two inputs per operator because it becomes ambiguous as to which operator they refer to.
 
     var token_input: usize = tokens.len;
     var operands = Stack(f64).init();
@@ -290,10 +287,6 @@ pub fn main() !u8 {
         }
         token_input -= 1;
     }
-
-    // I think as we consume tokens we increase the length of the string we want to output.
-    // add 1 1 add 1 1
-    // For every item in the operand stack we track where it started and add their ranges together.
 
     if (operands.len < 1) {
         try stdout.print("nil", .{});
