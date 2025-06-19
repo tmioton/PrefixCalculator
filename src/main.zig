@@ -51,16 +51,34 @@ const InputStore = struct {
     }
 };
 
+const Range = struct { start: usize, end: usize };
+
 const ErrorString = struct {
     data: [string_max]u8 = undefined,
     len: usize = 0,
 
-    fn init(store: *const InputStore, index: usize) ErrorString {
+    fn from_input(store: *const InputStore, index: usize) ErrorString {
         var self: ErrorString = .{};
         const item = store.slices[index];
         @memset(self.data[0..item.head], ' ');
         @memset(self.data[item.head .. item.head + item.len], '^');
         self.len = item.head + item.len;
+        return self;
+    }
+
+    fn from_input_range(store: *const InputStore, range: Range) ErrorString {
+        var self: ErrorString = .{};
+        const start = store.slices[range.start];
+        @memset(self.data[0..start.head], ' ');
+        var len: usize = 0;
+        for (range.start..range.end) |i| {
+            len += store.slices[i].len;
+        }
+
+        // Account for spaces in input store.
+        len += (range.end - 1) - range.start;
+        @memset(self.data[start.head .. start.head + len], '^');
+        self.len = start.head + len;
         return self;
     }
 
@@ -162,7 +180,10 @@ pub fn main() !u8 {
         var arg_buffer: [string_max]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&arg_buffer);
         const allocator = fba.allocator();
-        var args = try std.process.argsWithAllocator(allocator);
+        var args = std.process.argsWithAllocator(allocator) catch {
+            try stderr.print("Excessive input.", .{});
+            return 1;
+        };
         defer args.deinit(); // Technically we don't need to free, but it's a noop.
 
         const command = std.fs.path.basename(args.next().?); // The program has to have a first arg.
@@ -206,13 +227,13 @@ pub fn main() !u8 {
         } else null;
 
         if (operand == null and operator == null) {
-            const error_string = ErrorString.init(&input, i);
+            const error_string = ErrorString.from_input(&input, i);
             try stderr.print("Invalid operator or operand.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
             return 1;
         }
 
         tokens.push(if (operand != null) .{ .operand = operand.? } else .{ .operator = operator.? }) catch {
-            const error_string = ErrorString.init(&input, i);
+            const error_string = ErrorString.from_input(&input, i);
             try stderr.print("Exceeded maximum count of operands and operators.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
             return 1;
         };
@@ -227,9 +248,13 @@ pub fn main() !u8 {
     // Add 1 to stack.
     // add pops last 2 numbers and adds result to stack.
     // No more tokens, pop result from stack.
+    //
+    // What are the possibilities here?
+    // We can't accept more than two inputs per operator because it becomes ambiguous as to which operator they refer to.
 
     var token_input: usize = tokens.len;
     var operands = Stack(f64).init();
+    var operand_ranges = Stack(Range).init();
     while (tokens.pop()) |token| {
         switch (token) {
             .operand => |operand| {
@@ -237,11 +262,14 @@ pub fn main() !u8 {
                     try stderr.print("Exceeded maximum operand count.\n", .{});
                     return 1;
                 };
+
+                // This and the operand stack have the same size. If that one didn't error, this one can't.
+                operand_ranges.push(.{ .start = token_input, .end = token_input + 1 }) catch unreachable;
             },
             .operator => |operator| {
                 // Check length here to avoid duplicated checking below.
                 if (operands.len < 2) {
-                    const error_string = ErrorString.init(&input, token_input);
+                    const error_string = ErrorString.from_input(&input, token_input);
                     try stderr.print("Operator missing required operands.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
                     return 1;
                 }
@@ -254,13 +282,30 @@ pub fn main() !u8 {
                     .div => a / b,
                     .pow => std.math.pow(f64, a, b),
                 }) catch unreachable; // We just pulled two operands off, it's impossible to not have space.
+
+                _ = operand_ranges.pop().?;
+                const b_range = operand_ranges.pop().?;
+                operand_ranges.push(.{ .start = token_input, .end = b_range.end }) catch unreachable;
             },
         }
         token_input -= 1;
     }
 
+    // I think as we consume tokens we increase the length of the string we want to output.
+    // add 1 1 add 1 1
+    // For every item in the operand stack we track where it started and add their ranges together.
+
     if (operands.len < 1) {
         try stdout.print("nil", .{});
+        return 1;
+    } else if (operands.len > 1) {
+        _ = operand_ranges.pop();
+        var total_range = operand_ranges.pop().?; // We know length is > 1
+        while (operand_ranges.pop()) |range| {
+            total_range.end = range.end;
+        }
+        const error_string = ErrorString.from_input_range(&input, total_range);
+        try stderr.print("Unused operands.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
         return 1;
     }
     try stdout.print("{d}", .{operands.pop().?});
