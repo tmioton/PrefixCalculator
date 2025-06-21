@@ -47,8 +47,6 @@ const ErrorString = struct {
 };
 
 pub fn main() !u8 {
-    // How do we add good error output?
-    //  Try to determine if the input was meant to be an operand or operator. <- this probably requires an AST.
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
 
