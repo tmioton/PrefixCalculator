@@ -1,55 +1,14 @@
 const std = @import("std");
 
-const string_max = 1024;
-const token_max = 256;
+const string_max = @import("constants.zig").string_max;
+const token_max = @import("constants.zig").token_max;
 
-const InputStore = struct {
-    /// Structure for storing command-line inputs for good error output.
-    ///  Automatically adds spaces between arguments.
-    const StoreSlice = struct {
-        head: u24, // u16, but we'll just use the extra space. Only 1 byte wasted as opposed to 7 with Stack(Token).
-        len: u8,
-    };
+const Stack = @import("stack.zig").Stack;
 
-    const limit_head = std.math.maxInt(@FieldType(StoreSlice, "head"));
-    const limit_string = std.math.maxInt(@FieldType(StoreSlice, "len"));
+const TokenStack = @import("TokenStack.zig");
+const Operator = TokenStack.Operator;
 
-    const capacity = token_max + 1;
-
-    strings: [string_max]u8 = undefined,
-    slices: [capacity]StoreSlice = undefined,
-    head: usize = 0,
-    len: usize = 0,
-
-    fn init() InputStore {
-        return .{};
-    }
-
-    /// Store a string.
-    fn push(self: *InputStore, value: []const u8) error{ full, out_of_range }!void {
-        if (self.head + value.len > limit_head or value.len > limit_string) return error.out_of_range;
-        if (self.len == capacity or self.head + value.len > string_max) return error.full;
-        if (self.len != 0) {
-            self.strings[self.head] = ' ';
-            self.head += 1;
-        }
-        std.mem.copyForwards(u8, self.strings[self.head..string_max], value);
-        self.slices[self.len] = .{ .head = @truncate(self.head), .len = @truncate(value.len) };
-        self.head += value.len;
-        self.len += 1;
-    }
-
-    /// Return the nth string pushed into the store.
-    fn get(self: *const InputStore, index: usize) []const u8 {
-        const slice = self.slices[index];
-        return self.strings[slice.head .. slice.head + slice.len];
-    }
-
-    /// Join all strings together into a command-line representation.
-    fn all(self: *const InputStore) []const u8 {
-        return self.strings[0..self.head];
-    }
-};
+const InputStore = @import("InputStore.zig");
 
 const Range = struct { start: usize, end: usize };
 
@@ -87,83 +46,6 @@ const ErrorString = struct {
     }
 };
 
-fn Stack(comptime T: type) type {
-    return struct {
-        const Self = @This();
-
-        data: [token_max]T = undefined,
-        len: usize = 0,
-
-        fn init() Self {
-            return .{};
-        }
-
-        /// Empty the stack.
-        fn reset(self: *Self) void {
-            self.data = undefined;
-            self.len = 0;
-        }
-
-        /// Add an item to the end of the stack.
-        fn push(self: *Self, value: T) error{full}!void {
-            if (self.len == token_max) return error.full;
-            self.data[self.len] = value;
-            self.len += 1;
-        }
-
-        /// Remove an item from the end of the stack.
-        fn pop(self: *Self) ?T {
-            if (self.len == 0) return null;
-            self.len -= 1;
-            return self.data[self.len];
-        }
-    };
-}
-
-const Operator = enum { add, sub, mul, div, pow };
-
-const TokenStack = struct {
-    // This can probably be made into a generic, but it's fine to stay like this.
-    const Type = enum(u8) { operand, operator };
-    const Data = union { operand: f64, operator: Operator };
-    const Token = union(Type) { operand: f64, operator: Operator };
-
-    tokens: [token_max]Data = undefined,
-    types: [token_max]Type = undefined,
-    len: usize = 0,
-
-    fn init() TokenStack {
-        return .{};
-    }
-
-    /// Add a token to the end of the stack.
-    fn push(self: *TokenStack, value: Token) error{full}!void {
-        if (self.len == token_max) return error.full;
-        switch (value) {
-            .operand => |operand| {
-                self.tokens[self.len] = .{ .operand = operand };
-                self.types[self.len] = .operand;
-                self.len += 1;
-            },
-            .operator => |operator| {
-                self.tokens[self.len] = .{ .operator = operator };
-                self.types[self.len] = .operator;
-                self.len += 1;
-            },
-        }
-    }
-
-    /// Remove a token from the end of the stack.
-    fn pop(self: *TokenStack) ?Token {
-        if (self.len == 0) return null;
-        self.len -= 1;
-        return switch (self.types[self.len]) {
-            .operand => .{ .operand = self.tokens[self.len].operand },
-            .operator => .{ .operator = self.tokens[self.len].operator },
-        };
-    }
-};
-
 pub fn main() !u8 {
     // How do we add good error output?
     //  Try to determine if the input was meant to be an operand or operator. <- this probably requires an AST.
@@ -174,7 +56,6 @@ pub fn main() !u8 {
     //try stdout.print("Size of {s}: {}\n", .{ @typeName(type_in_question), @sizeOf(type_in_question) });
 
     var input = InputStore.init();
-
     var tokens = TokenStack.init();
     {
         var arg_buffer: [string_max]u8 = undefined;
@@ -218,6 +99,20 @@ pub fn main() !u8 {
         return 1;
     }
 
+    // add add 1 1 1 - Operand count since last operator wouldn't be even here.
+    // push add. add needs two operands.
+    // push add. add needs two operands and consumes one of the above.
+    // push one. consume one of the above operands.
+    // push one. consume one of the above operands.
+    // push one. consume one of the above operands.
+    // add add 1 add 1 1 1
+    // If we reach 0 and there's still input we error the rest of the input as excessive.
+    // If we reach the end of the input and still need operands we know there's an error so we work backwards.
+    // Is a tree more efficient than that backwards lookup?
+    // 1 1 add 1 1 - first two will drop needed_operands down to -2.
+    // We want to support 1 number being the result.
+
+    var needed_operands: usize = 0;
     for (1..input.len) |i| {
         const arg = input.get(i);
         const operand: ?f64 = std.fmt.parseFloat(f64, arg) catch null;
@@ -232,12 +127,41 @@ pub fn main() !u8 {
             return 1;
         }
 
-        tokens.push(if (operand != null) .{ .operand = operand.? } else .{ .operator = operator.? }) catch {
+        (push: {
+            if (operand != null) {
+                if (i == 1) {
+                    @branchHint(.unlikely); // Just a good place to use this, even if it can get optimized away.
+                    if (input.len == 2) {
+                        tokens.push_operand(operand.?) catch unreachable;
+                        break; // Support single operand return.
+                    }
+                    break :push; // Handled by the needed_operands == 0 check below.
+                }
+                needed_operands -= 1;
+                break :push tokens.push_operand(operand.?);
+            } else {
+                needed_operands += 2;
+                break :push tokens.push_operator(operator.?);
+            }
+        }) catch {
             const error_string = ErrorString.from_input(&input, i);
             try stderr.print("Exceeded maximum count of operands and operators.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
             return 1;
         };
+
+        if (needed_operands == 0 and i < input.len - 1) {
+            const error_string = ErrorString.from_input_range(&input, Range{ .start = i + 1, .end = input.len });
+            try stderr.print("Unused input.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
+            return 1;
+        }
     }
+
+    // TODO: Implement backtracking.
+
+    // if (needed_operands > 0) {
+    //     try stderr.print("Operator missing required operands.\n", .{});
+    //     return 1;
+    // }
 
     // add 1 mul sub 3 2 4
     // Add 4 to stack.
@@ -288,6 +212,8 @@ pub fn main() !u8 {
         token_input -= 1;
     }
 
+    // In addition to converting this to detect unused values before processing,
+    // I would also like to detect unused values before checking for missing operands.
     if (operands.len < 1) {
         try stdout.print("nil", .{});
         return 1;
@@ -298,7 +224,7 @@ pub fn main() !u8 {
             total_range.end = range.end;
         }
         const error_string = ErrorString.from_input_range(&input, total_range);
-        try stderr.print("Unused operands.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
+        try stderr.print("Unused values.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
         return 1;
     }
     try stdout.print("{d}", .{operands.pop().?});
