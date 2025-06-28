@@ -1,8 +1,8 @@
 .{
-    .name = .Calculator,
-    .version = "0.0.0",
-    .fingerprint = 0x6b2493122548f434, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.0-dev.631+9a3540d61",
+    .name = .prefix,
+    .version = "1.0.0",
+    .fingerprint = 0x93b1868e05a882cd, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.14.1",
     .dependencies = .{},
     .paths = .{
         "build.zig",
