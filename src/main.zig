@@ -101,26 +101,31 @@ pub fn main() !u8 {
     }
 
     if (input.len == 1) {
+        const binary = input.get(0);
         // Print the help text.
-        try stderr.print("", .{});
+        try stderr.print(
+            \\Command-line prefix calculator.
+            \\Example input:
+            \\{s} add 1 1
+            \\{s} add add 1 1 1
+            \\{s} 1
+            \\
+        , .{ binary, binary, binary });
         return 1;
     }
 
     // TODO: Rewrite this:
     //
-    // add add 1 1 1 - Operand count since last operator wouldn't be even here.
-    // push add. add needs two operands.
-    // push add. add needs two operands and consumes one of the above.
-    // push one. consume one of the above operands.
-    // push one. consume one of the above operands.
-    // push one. consume one of the above operands.
+    // add add 1 1 1
+    // push add. Add requires 2 operands and returns 1 - -1 remaining operands.
+    // push add. Add requires 2 operands and returns 1 - -2 remaining operands.
+    // push 1. -1 remaining operands.
+    // push 1. 0 remaining operands - program has to end with 1 operand remaining for output.
+    // push 1. 1 remaining operands - valid calculation.
     // add add 1 add 1 1 1
-    // If we reach 0 and there's still input we error the rest of the input as excessive.
-    // If we reach the end of the input and still need operands we know there's an error so we work backwards.
-    // Is a tree more efficient than that backwards lookup?
-    // 1 1 add 1 1 - first two will drop needed_operands down to -2.
-    // We want to support 1 number being the result.
 
+    // A tree will allow us to work backwards on tokenization.
+    // We would have to store invalid input if we want "unused input" to be higher priority than "invalid operand".
     var remaining_operands: isize = 0;
     for (1..input.len) |i| {
         const arg = input.get(i);
@@ -151,6 +156,7 @@ pub fn main() !u8 {
             return 1;
         };
 
+        // If we reach 0 and there's still input we error the rest of the input as excessive.
         if (remaining_operands == 1 and i < input.len - 1) {
             const error_string = ErrorString.fromInputRange(&input, Range{ .start = i + 1, .end = input.len });
             try stderr.print("Unused input.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
@@ -159,6 +165,7 @@ pub fn main() !u8 {
     }
 
     // If there are more operators than operands we work backwards to figure out which operand is missing input.
+    // Is a tree more efficient than that backtracking?
     if (remaining_operands < 1) {
         var token_input: usize = tokens.len;
         var operands: usize = 0;
