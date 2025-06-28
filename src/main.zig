@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 
 const string_max = @import("constants.zig").string_max;
 const token_max = @import("constants.zig").token_max;
@@ -97,6 +98,8 @@ pub fn main() !u8 {
         return 1;
     }
 
+    // TODO: Rewrite this:
+    //
     // add add 1 1 1 - Operand count since last operator wouldn't be even here.
     // push add. add needs two operands.
     // push add. add needs two operands and consumes one of the above.
@@ -110,36 +113,34 @@ pub fn main() !u8 {
     // 1 1 add 1 1 - first two will drop needed_operands down to -2.
     // We want to support 1 number being the result.
 
-    var needed_operands: usize = 0;
+    var remaining_operands: isize = 0;
     for (1..input.len) |i| {
         const arg = input.get(i);
-        const operand: ?f64 = std.fmt.parseFloat(f64, arg) catch null;
-        // Iterate over the names of the Operator enum and see if the input matches any.
-        const operator: ?Operator = for (std.meta.tags(Operator)) |op| {
-            if (std.mem.eql(u8, @tagName(op), arg)) break op;
-        } else null;
-
-        if (operand == null and operator == null) {
-            const error_string = ErrorString.from_input(&input, i);
-            try stderr.print("Invalid operator or operand.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
-            return 1;
-        }
-
         (push: {
-            if (operand != null) {
+            // parseFloat will exit immediately if the input doesn't match a number, so we try that first.
+            if (std.fmt.parseFloat(f64, arg) catch null) |operand| {
+                remaining_operands += 1;
                 if (i == 1) {
                     @branchHint(.unlikely); // Just a good place to use this, even if it can get optimized away.
                     if (input.len == 2) {
-                        tokens.push_operand(operand.?) catch unreachable;
+                        tokens.push_operand(operand) catch unreachable;
                         break; // Support single operand return.
                     }
                     break :push; // Handled by the needed_operands == 0 check below.
                 }
-                needed_operands -= 1;
-                break :push tokens.push_operand(operand.?);
+                break :push tokens.push_operand(operand);
             } else {
-                needed_operands += 2;
-                break :push tokens.push_operator(operator.?);
+                // Iterate over the names of the Operator enum and see if the input matches any.
+                if (for (std.meta.tags(Operator)) |op| {
+                    if (std.mem.eql(u8, @tagName(op), arg)) break op;
+                } else null) |operator| {
+                    remaining_operands -= 1; // Takes 2 and returns 1.
+                    break :push tokens.push_operator(operator);
+                } else {
+                    const error_string = ErrorString.from_input(&input, i);
+                    try stderr.print("Invalid operator or operand.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
+                    return 1;
+                }
             }
         }) catch {
             const error_string = ErrorString.from_input(&input, i);
@@ -147,19 +148,34 @@ pub fn main() !u8 {
             return 1;
         };
 
-        if (needed_operands == 0 and i < input.len - 1) {
+        if (remaining_operands == 1 and i < input.len - 1) {
             const error_string = ErrorString.from_input_range(&input, Range{ .start = i + 1, .end = input.len });
             try stderr.print("Unused input.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
             return 1;
         }
     }
 
-    // TODO: Implement backtracking.
-
-    // if (needed_operands > 0) {
-    //     try stderr.print("Operator missing required operands.\n", .{});
-    //     return 1;
-    // }
+    // If there are more operators than operands we work backwards to figure out which operand is missing input.
+    if (remaining_operands < 1) {
+        var token_input: usize = tokens.len;
+        var operands: usize = 0;
+        while (tokens.pop()) |token| {
+            switch (token) {
+                .operand => {
+                    operands += 1;
+                },
+                .operator => {
+                    if (operands < 2) {
+                        const error_string = ErrorString.from_input(&input, token_input);
+                        try stderr.print("Operator missing required operands.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
+                        return 1;
+                    }
+                    operands -= 1;
+                },
+            }
+            token_input -= 1;
+        }
+    }
 
     // add 1 mul sub 3 2 4
     // Add 4 to stack.
@@ -170,6 +186,8 @@ pub fn main() !u8 {
     // Add 1 to stack.
     // add pops last 2 numbers and adds result to stack.
     // No more tokens, pop result from stack.
+    //
+    // Actually, we might want to just store the tokens and waste the space instead of spending time constructing the token on request.
 
     var token_input: usize = tokens.len;
     var operands = Stack(f64).init();
@@ -186,12 +204,9 @@ pub fn main() !u8 {
                 operand_ranges.push(.{ .start = token_input, .end = token_input + 1 }) catch unreachable;
             },
             .operator => |operator| {
-                // Check length here to avoid duplicated checking below.
-                if (operands.len < 2) {
-                    const error_string = ErrorString.from_input(&input, token_input);
-                    try stderr.print("Operator missing required operands.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
-                    return 1;
-                }
+                // Can assert length here because we check for missing operands above.
+                if (operands.len < 2) @panic("invalid state: missing operands");
+
                 const a = operands.pop().?;
                 const b = operands.pop().?;
                 operands.push(switch (operator) {
@@ -216,14 +231,7 @@ pub fn main() !u8 {
         try stdout.print("nil", .{});
         return 1;
     } else if (operands.len > 1) {
-        _ = operand_ranges.pop();
-        var total_range = operand_ranges.pop().?; // We know length is > 1
-        while (operand_ranges.pop()) |range| {
-            total_range.end = range.end;
-        }
-        const error_string = ErrorString.from_input_range(&input, total_range);
-        try stderr.print("Unused values.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
-        return 1;
+        @panic("invalid state: unused input");
     }
     try stdout.print("{d}", .{operands.pop().?});
     return 0;
