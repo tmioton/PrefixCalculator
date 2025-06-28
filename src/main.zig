@@ -17,7 +17,7 @@ const ErrorString = struct {
     data: [string_max]u8 = undefined,
     len: usize = 0,
 
-    fn from_input(store: *const InputStore, index: usize) ErrorString {
+    fn fromInput(store: *const InputStore, index: usize) ErrorString {
         var self: ErrorString = .{};
         const item = store.slices[index];
         @memset(self.data[0..item.head], ' ');
@@ -26,7 +26,7 @@ const ErrorString = struct {
         return self;
     }
 
-    fn from_input_range(store: *const InputStore, range: Range) ErrorString {
+    fn fromInputRange(store: *const InputStore, range: Range) ErrorString {
         var self: ErrorString = .{};
         const start = store.slices[range.start];
         @memset(self.data[0..start.head], ' ');
@@ -46,6 +46,14 @@ const ErrorString = struct {
         return self.data[0..self.len];
     }
 };
+
+fn parseOperator(in: []const u8) ?Operator {
+    // Iterate over the names of the Operator enum and see if the input matches any.
+    for (std.meta.tags(Operator)) |op| {
+        if (std.mem.eql(u8, @tagName(op), in)) return op;
+    }
+    return null;
+}
 
 pub fn main() !u8 {
     const stdout = std.io.getStdOut().writer();
@@ -123,33 +131,28 @@ pub fn main() !u8 {
                 if (i == 1) {
                     @branchHint(.unlikely); // Just a good place to use this, even if it can get optimized away.
                     if (input.len == 2) {
-                        tokens.push_operand(operand) catch unreachable;
+                        tokens.pushOperand(operand) catch unreachable;
                         break; // Support single operand return.
                     }
                     break :push; // Handled by the needed_operands == 0 check below.
                 }
-                break :push tokens.push_operand(operand);
+                break :push tokens.pushOperand(operand);
+            } else if (parseOperator(arg)) |operator| {
+                remaining_operands -= 1; // Takes 2 and returns 1.
+                break :push tokens.pushOperator(operator);
             } else {
-                // Iterate over the names of the Operator enum and see if the input matches any.
-                if (for (std.meta.tags(Operator)) |op| {
-                    if (std.mem.eql(u8, @tagName(op), arg)) break op;
-                } else null) |operator| {
-                    remaining_operands -= 1; // Takes 2 and returns 1.
-                    break :push tokens.push_operator(operator);
-                } else {
-                    const error_string = ErrorString.from_input(&input, i);
-                    try stderr.print("Invalid operator or operand.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
-                    return 1;
-                }
+                const error_string = ErrorString.fromInput(&input, i);
+                try stderr.print("Invalid operator or operand.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
+                return 1;
             }
         }) catch {
-            const error_string = ErrorString.from_input(&input, i);
+            const error_string = ErrorString.fromInput(&input, i);
             try stderr.print("Exceeded maximum count of operands and operators.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
             return 1;
         };
 
         if (remaining_operands == 1 and i < input.len - 1) {
-            const error_string = ErrorString.from_input_range(&input, Range{ .start = i + 1, .end = input.len });
+            const error_string = ErrorString.fromInputRange(&input, Range{ .start = i + 1, .end = input.len });
             try stderr.print("Unused input.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
             return 1;
         }
@@ -166,7 +169,7 @@ pub fn main() !u8 {
                 },
                 .operator => {
                     if (operands < 2) {
-                        const error_string = ErrorString.from_input(&input, token_input);
+                        const error_string = ErrorString.fromInput(&input, token_input);
                         try stderr.print("Operator missing required operands.\n{s}\n{s}\n", .{ input.all(), error_string.get() });
                         return 1;
                     }
