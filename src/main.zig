@@ -165,7 +165,7 @@ pub fn main() !u8 {
     }
 
     // If there are more operators than operands we work backwards to figure out which operand is missing input.
-    // Is a tree more efficient than that backtracking?
+    // Is a tree more efficient than backtracking?
     if (remaining_operands < 1) {
         var token_input: usize = tokens.len;
         var operands: usize = 0;
@@ -205,10 +205,7 @@ pub fn main() !u8 {
     while (tokens.pop()) |token| {
         switch (token) {
             .operand => |operand| {
-                operands.push(operand) catch {
-                    try stderr.print("Exceeded maximum operand count.\n", .{});
-                    return 1;
-                };
+                operands.push(operand) catch @panic("invalid state: stack overflow");
 
                 // This and the operand stack have the same size. If that one didn't error, this one can't.
                 operand_ranges.push(.{ .start = token_input, .end = token_input + 1 }) catch unreachable;
