@@ -3,6 +3,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // addModule instead of createModule so the executable module is exported.
     const prefix = b.addModule("prefix", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
